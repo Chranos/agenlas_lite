@@ -1,0 +1,19 @@
+[project]
+name = "agenlas-lite"
+version = "0.1.0"
+description = "A small virtual research team whose kernel enforces policy, budget, human gates and provenance."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+agenlas-lite = "agenlas_lite.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["agenlas_lite"]
+
+[tool.setuptools.package-data]
+agenlas_lite = ["report.html"]

@@ -1,0 +1,72 @@
+{
+  "name": "research",
+  "description": "Turn a one-sentence research question into an evidence-backed short paper draft.",
+  "playbook": [
+    "intake: write a brief (question, scope, success criteria)",
+    "scout: search literature and summarise related work",
+    "roundtable: experts propose and debate ideas",
+    "gate idea: the human picks one idea",
+    "worker: design and run a small experiment",
+    "writer: draft the paper, citing artifacts as [A#]",
+    "reviewer: score the draft against the rubric",
+    "gate final: the human accepts or asks for revision"
+  ],
+  "roles": {
+    "intake": {
+      "runner": "llm",
+      "output": "brief",
+      "tools": [],
+      "system": "You are the intake analyst of a small research team. Turn the user's request into a brief. Reply with JSON: {\"question\": str, \"scope\": str, \"keywords\": [str], \"success_criteria\": [str]}."
+    },
+    "scout": {
+      "runner": "search",
+      "output": "related_work",
+      "tools": ["arxiv_search"],
+      "system": "You are the literature scout. Given search results, summarise what is known and what is missing. Reply with JSON: {\"summary\": str, \"gaps\": [str]}."
+    },
+    "roundtable": {
+      "runner": "roundtable",
+      "output": "ideas",
+      "tools": [],
+      "experts": ["methods expert", "data expert", "skeptic"],
+      "system": "You take part in a research roundtable. Propose ideas grounded in the brief and the related work. Reply with JSON: {\"ideas\": [{\"title\": str, \"hypothesis\": str, \"experiment\": str}]}."
+    },
+    "worker": {
+      "runner": "experiment",
+      "output": "evidence",
+      "tools": ["run_python"],
+      "system": "You are the experiment worker. Write one self-contained Python 3 script (standard library only) that tests the chosen idea on ./papers.json (a list of {title, abstract}). Print one JSON object with the metrics as the last line. Reply with only the code in a ```python block."
+    },
+    "writer": {
+      "runner": "llm",
+      "output": "draft",
+      "tools": [],
+      "system": "You are the writer. Draft a short paper in Markdown (Title, Abstract, Method, Results, Limitations). Every sentence that states a number or a prior finding must end with the id of the artifact that supports it, e.g. [A5]. Use only the artifact ids you are given."
+    },
+    "reviewer": {
+      "runner": "llm",
+      "output": "review",
+      "tools": [],
+      "system": "You are the reviewer. Score the draft 1-5 on each rubric item and list concrete fixes. Reply with JSON: {\"scores\": {item: int}, \"fixes\": [str]}."
+    }
+  },
+  "rubric": ["clarity", "novelty", "evidence", "limitations"],
+  "gates": {
+    "idea": {"after": "ideas", "question": "Which idea should the team pursue?"},
+    "final": {"after": "review", "question": "Accept this draft for export?"}
+  },
+  "requires": {
+    "worker": ["gate:idea"],
+    "writer": ["evidence"],
+    "reviewer": ["draft"],
+    "finish": ["gate:final"]
+  },
+  "policy": {
+    "max_model_calls": 40,
+    "max_tokens": 200000,
+    "max_steps": 20,
+    "net_allow": ["export.arxiv.org"],
+    "code_deny": ["import socket", "import subprocess", "os.system", "shutil.rmtree", "urllib", "requests", "http.client", "__import__"],
+    "run_timeout_s": 60
+  }
+}

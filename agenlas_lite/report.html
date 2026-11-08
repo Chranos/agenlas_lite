@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agenlas-lite run</title>
+<style>
+:root { --bg:#f6f7f9; --card:#fff; --ink:#1d2330; --mute:#6b7280; --line:#e3e6eb; --acc:#2f6fed; --ok:#16a34a; --bad:#dc2626; --gate:#d97706; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 "Inter","Noto Sans CJK SC",system-ui,sans-serif; }
+header { padding:14px 20px; background:var(--ink); color:#fff; display:flex; gap:18px; align-items:center; flex-wrap:wrap; }
+header h1 { font-size:17px; margin:0; } header .goal { opacity:.85; flex:1; min-width:240px; }
+.stat { font-size:12px; background:#ffffff1a; padding:4px 10px; border-radius:12px; }
+button { background:var(--acc); color:#fff; border:0; border-radius:6px; padding:6px 12px; cursor:pointer; }
+main { display:grid; grid-template-columns: 1.15fr 1fr 1fr; gap:14px; padding:14px; height:calc(100vh - 56px); }
+section { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:auto; padding:12px 14px; }
+h2 { font-size:13px; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); margin:0 0 10px; }
+.ev { display:grid; grid-template-columns: 96px 1fr; gap:8px; padding:6px 0; border-bottom:1px dashed var(--line); }
+.ev .who { font-weight:600; font-size:12px; } .ev .what { font-size:12.5px; word-break:break-word; }
+.tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:9px; background:#eef2ff; color:var(--acc); margin-right:6px; }
+.rej { background:#fef2f2; } .rej .tag { background:#fee2e2; color:var(--bad); }
+.gate { background:#fffbeb; } .gate .tag { background:#fef3c7; color:var(--gate); }
+.pass .tag { background:#dcfce7; color:var(--ok); }
+.roles { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; }
+.role { border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:12px; transition:all .3s; }
+.role.on { border-color:var(--acc); background:#eef2ff; box-shadow:0 0 0 3px #2f6fed22; }
+.meter { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:4px 0 10px; } .meter div { height:100%; background:var(--acc); width:0; transition:width .4s; }
+.art { border:1px solid var(--line); border-radius:8px; padding:7px 10px; margin-bottom:8px; font-size:12.5px; }
+.art b { color:var(--acc); } .art .par { color:var(--mute); font-size:11.5px; } .art.hl { outline:2px solid var(--acc); }
+.paper h1 { font-size:16px; } .paper h2 { font-size:13px; text-transform:none; letter-spacing:0; color:var(--ink); margin:12px 0 4px; }
+.paper p { margin:4px 0; font-size:13px; } .cite { background:#eef2ff; color:var(--acc); border-radius:4px; padding:0 4px; cursor:pointer; font-weight:600; }
+.small { color:var(--mute); font-size:12px; }
+@media (max-width: 900px) { main { grid-template-columns:1fr; height:auto; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>agenlas-lite</h1>
+  <div class="goal" id="goal"></div>
+  <span class="stat" id="model"></span><span class="stat" id="calls"></span><span class="stat" id="status"></span>
+  <button id="replay">Replay run</button>
+</header>
+<main>
+  <section><h2>Timeline (audit log)</h2><div id="timeline"></div></section>
+  <section>
+    <h2>Team</h2><div class="roles" id="roles"></div>
+    <h2>Budget</h2><div class="small" id="budgetText"></div><div class="meter"><div id="budget"></div></div>
+    <h2>Human gates</h2><div id="gates" class="small">none yet</div>
+    <h2 style="margin-top:14px">Draft</h2><div class="paper" id="paper"><span class="small">no draft yet</span></div>
+  </section>
+  <section><h2>Artifacts and provenance</h2><div id="artifacts"></div></section>
+</main>
+<script>
+const DATA = /*DATA*/null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const ROLES = ["orchestrator", ...new Set(DATA.artifacts.map(a => a.producer).filter(p => p !== "human"))];
+const MAX_CALLS = DATA.events.filter(e => e.action === "model").length;
+$("goal").textContent = DATA.goal; $("model").textContent = "model: " + DATA.model;
+
+function render(n) {
+  const evs = DATA.events.slice(0, n);
+  const shown = evs.filter(e => !(e.action === "check" && e.allowed) && e.action !== "model");
+  $("timeline").innerHTML = shown.map(e => {
+    let cls = "", tag = e.action, txt = "";
+    if (e.action === "check") { cls = "rej"; tag = "kernel refused"; txt = `${e.request} ${e.target}: ${e.reason}`; }
+    else if (e.action === "spawn") txt = `call <b>${e.role}</b>: ${esc(e.task)} ${e.inputs.length ? "← " + e.inputs.join(", ") : ""}`;
+    else if (e.action === "artifact") txt = `<b>${e.id}</b> ${e.kind} ${e.parents.length ? "← " + e.parents.join(", ") : ""}`;
+    else if (e.action === "gate_open") { cls = "gate"; txt = `${esc(e.question)}<br>${e.options.map(esc).join(" / ")}`; }
+    else if (e.action === "gate_decision") { cls = "gate"; txt = `<b>${esc(e.decision)}</b> → ${e.id}`; }
+    else if (e.action === "verdict") { cls = e.pass ? "pass" : "rej"; tag = e.pass ? "guard: pass" : "guard: revise"; txt = `${e.id} ${e.problems.map(esc).join("; ")}`; }
+    else if (e.action === "decide") txt = esc(JSON.stringify(e.decision).slice(0, 160));
+    else if (e.action === "rejected") { cls = "rej"; txt = esc(e.error); }
+    else txt = esc(JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !["t","actor","action"].includes(k)))).slice(0, 180));
+    return `<div class="ev ${cls}"><div class="who">${e.actor}</div><div class="what"><span class="tag">${tag}</span>${txt}</div></div>`;
+  }).join("");
+  $("timeline").parentElement.scrollTop = 1e9;
+
+  const last = [...evs].reverse().find(e => e.action === "spawn" || e.action === "decide");
+  const active = last && last.action === "spawn" ? last.role : "orchestrator";
+  $("roles").innerHTML = ROLES.map(r => `<div class="role ${r === active && n < DATA.events.length ? "on" : ""}">${r}</div>`).join("");
+
+  const calls = evs.filter(e => e.action === "model");
+  const tokens = calls.reduce((s, e) => s + e.tokens, 0);
+  $("calls").textContent = `${calls.length} model calls`;
+  $("budgetText").textContent = `${calls.length} model calls, ${tokens} tokens`;
+  $("budget").style.width = (100 * calls.length / Math.max(MAX_CALLS, 1)) + "%";
+  const gates = evs.filter(e => e.action === "gate_decision");
+  $("gates").innerHTML = gates.length ? gates.map(g => `<div><span class="tag">${g.gate}</span>${esc(g.decision)}</div>`).join("") : "none yet";
+
+  const artIds = new Set(evs.filter(e => e.action === "artifact" || e.action === "gate_decision").map(e => e.id));
+  const arts = DATA.artifacts.filter(a => artIds.has(a.id));
+  $("artifacts").innerHTML = arts.map(a => `<div class="art" id="art-${a.id}"><b>${a.id}</b> ${a.kind} <span class="small">by ${a.producer}</span>
+    <div class="par">derived from: ${a.parents.join(", ") || "—"} · sha256 ${a.sha256.slice(0, 10)}</div>
+    <div class="small">${esc(JSON.stringify(a.content)).slice(0, 220)}</div></div>`).join("");
+  const draft = [...arts].reverse().find(a => a.kind === "draft");
+  if (draft) $("paper").innerHTML = String(draft.content).split("\n").filter(Boolean).map(l =>
+    l.startsWith("## ") ? `<h2>${esc(l.slice(3))}</h2>` : l.startsWith("# ") ? `<h1>${esc(l.slice(2))}</h1>` :
+    `<p>${esc(l).replace(/\[(A\d+)\]/g, '<span class="cite" data-id="$1">[$1]</span>')}</p>`).join("");
+  else $("paper").innerHTML = '<span class="small">no draft yet</span>';
+  $("status").textContent = n < DATA.events.length ? "running…" : (DATA.finished ? "finished" : "stopped");
+}
+
+document.addEventListener("click", ev => {
+  const id = ev.target.dataset && ev.target.dataset.id; if (!id) return;
+  document.querySelectorAll(".art").forEach(x => x.classList.toggle("hl", x.id === "art-" + id));
+  $("art-" + id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+let timer;
+function replay(ms) {
+  clearInterval(timer); let k = 0;
+  const stops = DATA.events.map((e, i) => i + 1).filter(n => { const e = DATA.events[n - 1]; return !(e.action === "check" && e.allowed) && e.action !== "model"; });
+  stops[stops.length - 1] = DATA.events.length;
+  timer = setInterval(() => { render(stops[k++]); if (k >= stops.length) clearInterval(timer); }, ms);
+}
+$("replay").onclick = () => replay(450);
+const q = new URLSearchParams(location.search);
+if (q.has("replay")) replay(Number(q.get("replay")) || 450); else render(DATA.events.length);
+</script>
+</body>
+</html>
